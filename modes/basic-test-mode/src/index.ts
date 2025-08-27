@@ -181,21 +181,18 @@ function modeFactory() {
         'WindowLevelRegion',
       ]);
 
-      customizationService.setCustomizations(
-        {
-          'ohif.hotkeyBindings': {
-            $push: [
-              {
-                commandName: 'undo',
-                label: 'Undo',
-                keys: ['ctrl+z'],
-                isEditable: true,
-              },
-            ],
-          },
+      customizationService.setCustomizations({
+        'ohif.hotkeyBindings': {
+          $push: [
+            {
+              commandName: 'undo',
+              label: 'Undo',
+              keys: ['ctrl+z'],
+              isEditable: true,
+            },
+          ],
         },
-        'mode'
-      );
+      });
     },
     onModeExit: ({ servicesManager }: withAppTypes) => {
       const {

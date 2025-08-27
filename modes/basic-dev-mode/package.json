@@ -32,6 +32,7 @@
   },
   "peerDependencies": {
     "@ohif/core": "3.11.0",
+    "ohif-extension-math": "^0.0.1",
     "@ohif/extension-cornerstone": "3.11.0",
     "@ohif/extension-cornerstone-dicom-sr": "3.11.0",
     "@ohif/extension-default": "3.11.0",

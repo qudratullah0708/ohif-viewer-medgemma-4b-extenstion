@@ -79,6 +79,22 @@ module.exports = (env, argv) => {
         // Hoisted Yarn Workspace Modules
         path.resolve(__dirname, '../../../node_modules'),
         SRC_DIR,
+        path.resolve(
+          __dirname,
+          'C:/Users/PMLS/Desktop/ohif-viewer-medgemma-4b-extenstion/custom-extensions/my-extension/node_modules'
+        ),
+        path.resolve(
+          __dirname,
+          'C:/Users/PMLS/Desktop/ohif-viewer-medgemma-4b-extenstion/custom-extensions/my-extension/node_modules'
+        ),
+        path.resolve(__dirname, 'custom-extensions/my-extension/node_modules'),
+        path.resolve(__dirname, 'custom-extensions/my-extension/node_modules'),
+        path.resolve(__dirname, '../ohif-extension/my-extension/node_modules'),
+        path.resolve(__dirname, '../ohif-extension/my-extension/node_modules'),
+        path.resolve(__dirname, 'C:/Users/PMLS/Desktop/ohif-modes/my-mode/node_modules'),
+        path.resolve(__dirname, 'C:/Users/PMLS/Desktop/ohif-modes/my-mode/node_modules'),
+        path.resolve(__dirname, 'C:/Users/PMLS/Desktop/ohif-extension/my-extension/node_modules'),
+        path.resolve(__dirname, 'C:/Users/PMLS/Desktop/ohif-extension/my-extension/node_modules'),
       ],
     },
     plugins: [
@@ -138,15 +154,15 @@ module.exports = (env, argv) => {
       ...(IS_COVERAGE
         ? []
         : [
-          new InjectManifest({
-            swDest: 'sw.js',
-            swSrc: path.join(SRC_DIR, 'service-worker.js'),
-            // Need to exclude the theme as it is updated independently
-            exclude: [/theme/],
-            // Cache large files for the manifests to avoid warning messages
-            maximumFileSizeToCacheInBytes: 1024 * 1024 * 50,
-          }),
-        ]),
+            new InjectManifest({
+              swDest: 'sw.js',
+              swSrc: path.join(SRC_DIR, 'service-worker.js'),
+              // Need to exclude the theme as it is updated independently
+              exclude: [/theme/],
+              // Cache large files for the manifests to avoid warning messages
+              maximumFileSizeToCacheInBytes: 1024 * 1024 * 50,
+            }),
+          ]),
     ],
     // https://webpack.js.org/configuration/dev-server/
     devServer: {
