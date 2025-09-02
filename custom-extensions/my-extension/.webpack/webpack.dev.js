@@ -6,10 +6,8 @@ const outputFile = 'index.umd.js';
 const rootDir = path.resolve(__dirname, '../');
 const outputFolder = path.join(__dirname, `../dist/umd/${pkg.name}/`);
 
-// Todo: add ESM build for the extension in addition to umd build
-
 const config = {
-  mode: 'production',
+  mode: 'development',
   entry: rootDir + '/' + pkg.module,
   devtool: 'source-map',
   output: {
@@ -44,7 +42,6 @@ const config = {
     },
   ],
   module: {
-
     rules: [
       {
         test: /\.svg?$/,
@@ -96,7 +93,7 @@ const config = {
     // Provide environment variables to the browser
     new webpack.DefinePlugin({
       'process.env': JSON.stringify({
-        NODE_ENV: 'production',
+        NODE_ENV: 'development',
         REACT_APP_API_URL: process.env.REACT_APP_API_URL || 'http://localhost:8000',
         REACT_APP_GEMINI_API_KEY: process.env.REACT_APP_GEMINI_API_KEY || '',
       }),

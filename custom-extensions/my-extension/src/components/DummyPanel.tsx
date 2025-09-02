@@ -1,5 +1,7 @@
 import React from 'react';
 import DummyComponent from './DummyComponent';
+import { apiService } from '../services/api';
+import { createImageIdentifier } from '../utils/imageUtils';
 
 /**
  * DummyPanel - A panel that contains our dummy component for testing
@@ -7,6 +9,42 @@ import DummyComponent from './DummyComponent';
 function DummyPanel(): React.ReactElement {
   // Add console logging to debug
   console.log('DummyPanel is rendering!');
+
+  // Auto-register current image when panel loads
+  React.useEffect(() => {
+    const registerCurrentImage = async () => {
+      try {
+        const canvas = document.querySelector<HTMLCanvasElement>('.Viewport canvas, canvas');
+        if (canvas) {
+          const metadata = createImageIdentifier(canvas);
+
+          // Try to get existing image first
+          try {
+            await apiService.getImageByOhifId(metadata.imageId);
+            console.log('Current image already registered');
+          } catch (error) {
+            // Image doesn't exist, create it
+            const newImage = await apiService.createImage({
+              image_id: metadata.imageId,
+              study_instance_uid: metadata.studyInstanceUid,
+              series_instance_uid: metadata.seriesInstanceUid,
+              sop_instance_uid: metadata.sopInstanceUid,
+              patient_id: metadata.patientId,
+              study_date: metadata.studyDate,
+              modality: metadata.modality,
+            });
+            console.log('Registered new image:', newImage.id);
+          }
+        }
+      } catch (error) {
+        console.error('Failed to auto-register image:', error);
+      }
+    };
+
+    // Small delay to ensure viewport is loaded
+    const timer = setTimeout(registerCurrentImage, 1000);
+    return () => clearTimeout(timer);
+  }, []);
 
   const getSelectedImageData = async (): Promise<{ dataBase64: string; mimeType: string }> => {
     // Try to access the Cornerstone active viewport canvas and export to PNG base64
