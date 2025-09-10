@@ -52,6 +52,7 @@ from .routers.auth import router as auth_router
 from .routers.doctors import router as doctors_router
 from .routers.images import router as images_router
 from .routers.comments import router as comments_router
+
 from .routers.dev import router as dev_router
 
 app.include_router(auth_router, prefix=f"{settings.API_V1_STR}/auth", tags=["authentication"])

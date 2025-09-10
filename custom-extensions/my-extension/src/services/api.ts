@@ -32,6 +32,10 @@ export interface CreateCommentRequest {
   ai_model?: string;
 }
 
+export interface UpdateCommentRequest {
+  content: string;
+}
+
 export interface CreateImageRequest {
   image_id: string;
   study_instance_uid?: string;
@@ -165,6 +169,43 @@ class ApiService {
     return response.json();
   }
 
+  async updateComment(commentId: number, commentData: UpdateCommentRequest): Promise<Comment> {
+    console.log('📤 Updating comment:', commentId, commentData);
+    const response = await fetch(`${API_BASE_URL}${this.apiPrefix()}/comments/${commentId}`, {
+      method: 'PUT',
+      headers: this.getAuthHeaders(),
+      body: JSON.stringify(commentData),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ Failed to update comment:', response.status, errorText);
+      throw new Error(`Failed to update comment: ${response.statusText}`);
+    }
+
+    const result = await response.json();
+    console.log('✅ Comment updated successfully:', result);
+    return result;
+  }
+
+  async deleteComment(commentId: number): Promise<{ message: string }> {
+    console.log('📤 Deleting comment:', commentId);
+    const response = await fetch(`${API_BASE_URL}${this.apiPrefix()}/comments/${commentId}`, {
+      method: 'DELETE',
+      headers: this.getAuthHeaders(),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('❌ Failed to delete comment:', response.status, errorText);
+      throw new Error(`Failed to delete comment: ${response.statusText}`);
+    }
+
+    const result = await response.json();
+    console.log('✅ Comment deleted successfully:', result);
+    return result;
+  }
+
   async registerDoctor(payload: RegisterDoctorRequest): Promise<{ message: string; doctor_id: number }> {
     const url = `${API_BASE_URL}/api/v1/auth/register`;
     const response = await fetch(url, {
@@ -218,6 +259,16 @@ class ApiService {
 
   getStoredDoctorName(): string | null {
     try { return localStorage.getItem('DOCTOR_NAME'); } catch { return null; }
+  }
+
+  async getCurrentDoctorId(): Promise<number | null> {
+    if (!this.isAuthenticated()) return null;
+    try {
+      const doctor = await this.getCurrentDoctor();
+      return doctor?.id || null;
+    } catch {
+      return null;
+    }
   }
 }
 

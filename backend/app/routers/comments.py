@@ -22,8 +22,20 @@ def create_comment(
     """
     Create a new comment.
     """
-    # Check if the image exists
-    image = db.query(Image).filter(Image.id == comment_in.image_id).first()
+    # Resolve image either by image_id or by UIDs
+    image = None
+    if comment_in.image_id is not None:
+        image = db.query(Image).filter(Image.id == comment_in.image_id).first()
+    else:
+        image = (
+            db.query(Image)
+            .filter(
+                Image.study_instance_uid == comment_in.study_instance_uid,
+                Image.series_instance_uid == comment_in.series_instance_uid,
+                Image.sop_instance_uid == comment_in.sop_instance_uid,
+            )
+            .first()
+        )
     if not image:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -33,7 +45,7 @@ def create_comment(
     # Create new comment
     db_comment = Comment(
         content=comment_in.content,
-        image_id=comment_in.image_id,
+        image_id=image.id,
         doctor_id=None if comment_in.is_ai_generated else current_doctor.id,
         is_ai_generated=comment_in.is_ai_generated,
         ai_model=comment_in.ai_model,
@@ -98,6 +110,104 @@ def get_comments_by_image(
 
     return comments
 
+
+@router.get("/by-uids/study/{study_uid}", response_model=List[CommentResponse])
+def get_comments_by_study(
+    study_uid: str,
+    db: Session = Depends(get_db),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    current_doctor: Doctor = Depends(get_current_active_doctor),
+) -> Any:
+    """
+    Get all comments for a specific StudyInstanceUID across all series/instances.
+    """
+    image_ids = (
+        db.query(Image.id)
+        .filter(Image.study_instance_uid == study_uid)
+        .subquery()
+    )
+    comments = (
+        db.query(Comment)
+        .filter(Comment.image_id.in_(image_ids))
+        .order_by(Comment.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    return comments
+
+
+@router.get("/by-uids/study/{study_uid}/series/{series_uid}", response_model=List[CommentResponse])
+def get_comments_by_series(
+    study_uid: str,
+    series_uid: str,
+    db: Session = Depends(get_db),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    current_doctor: Doctor = Depends(get_current_active_doctor),
+) -> Any:
+    """
+    Get all comments for a specific SeriesInstanceUID within a study.
+    """
+    image_ids = (
+        db.query(Image.id)
+        .filter(
+            Image.study_instance_uid == study_uid,
+            Image.series_instance_uid == series_uid,
+        )
+        .subquery()
+    )
+    comments = (
+        db.query(Comment)
+        .filter(Comment.image_id.in_(image_ids))
+        .order_by(Comment.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    return comments
+
+
+@router.get(
+    "/by-uids/study/{study_uid}/series/{series_uid}/instances/{sop_instance_uid}",
+    response_model=List[CommentResponse],
+)
+def get_comments_by_instance(
+    study_uid: str,
+    series_uid: str,
+    sop_instance_uid: str,
+    db: Session = Depends(get_db),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100),
+    current_doctor: Doctor = Depends(get_current_active_doctor),
+) -> Any:
+    """
+    Get all comments for a specific SOPInstanceUID within a series/study.
+    """
+    image = (
+        db.query(Image)
+        .filter(
+            Image.study_instance_uid == study_uid,
+            Image.series_instance_uid == series_uid,
+            Image.sop_instance_uid == sop_instance_uid,
+        )
+        .first()
+    )
+    if not image:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Image not found",
+        )
+    comments = (
+        db.query(Comment)
+        .filter(Comment.image_id == image.id)
+        .order_by(Comment.created_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    return comments
 
 @router.get("/doctor/{doctor_id}", response_model=List[CommentResponse])
 def get_comments_by_doctor(

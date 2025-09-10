@@ -1,5 +1,5 @@
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator, ConfigDict
 from datetime import datetime
 
 from .doctor import DoctorResponse
@@ -14,7 +14,31 @@ class CommentBase(BaseModel):
 
 class CommentCreate(CommentBase):
     """Schema for creating a new comment"""
-    image_id: int = Field(..., description="ID of the image being commented on")
+    image_id: Optional[int] = Field(None, description="ID of the image being commented on")
+    study_instance_uid: Optional[str] = Field(
+        None,
+        description="StudyInstanceUID used to resolve the image if image_id is not provided",
+    )
+    series_instance_uid: Optional[str] = Field(
+        None,
+        description="SeriesInstanceUID used to resolve the image if image_id is not provided",
+    )
+    sop_instance_uid: Optional[str] = Field(
+        None,
+        description="SOPInstanceUID used to resolve the image if image_id is not provided",
+    )
+
+    @model_validator(mode="after")
+    def validate_image_ref(self):
+        image_id = self.image_id
+        s = self.study_instance_uid
+        r = self.series_instance_uid
+        o = self.sop_instance_uid
+        if image_id is None and not (s and r and o):
+            raise ValueError(
+                "Provide either image_id or the trio of study_instance_uid, series_instance_uid, sop_instance_uid"
+            )
+        return self
 
 
 class CommentUpdate(BaseModel):
@@ -30,8 +54,7 @@ class CommentInDB(CommentBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CommentResponse(CommentBase):
@@ -42,5 +65,4 @@ class CommentResponse(CommentBase):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        orm_mode = True
+    model_config = ConfigDict(from_attributes=True)

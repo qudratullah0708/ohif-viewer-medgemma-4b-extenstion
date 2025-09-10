@@ -1,5 +1,5 @@
 import React from 'react';
-import { apiService, Comment } from '../services/api';
+import { apiService, Comment, UpdateCommentRequest } from '../services/api';
 import { createImageIdentifier, ImageMetadata } from '../utils/imageUtils';
 import { GEMINI_API_KEY } from '../config';
 
@@ -17,6 +17,7 @@ type ChatMessage = {
   text: string;
   commentId?: number; // Link to database comment if saved
   isSaved?: boolean; // Whether this message was saved to database
+  fullComment?: Comment; // Full comment data from API for timestamps and permissions
 };
 
 const API_KEY = GEMINI_API_KEY || 'AIzaSyD-l0tRMme3ljv0AQ2DJPC7v8Ra38_17_c';
@@ -102,6 +103,10 @@ function DummyComponent({
   const [imageMimeType, setImageMimeType] = React.useState<string | null>(null);
   const [currentImageId, setCurrentImageId] = React.useState<number | null>(null);
   const [currentImageMetadata, setCurrentImageMetadata] = React.useState<ImageMetadata | null>(null);
+  const [toastMessage, setToastMessage] = React.useState<string | null>(null);
+  const [editingCommentId, setEditingCommentId] = React.useState<number | null>(null);
+  const [editingContent, setEditingContent] = React.useState<string>('');
+  const [currentDoctorId, setCurrentDoctorId] = React.useState<number | null>(null);
   const effectiveApiKey =
     apiKey || (typeof window !== 'undefined' && (window as any).GEMINI_API_KEY) || '';
 
@@ -111,7 +116,7 @@ function DummyComponent({
     // Initialize doctor display name if available
     const storedName = apiService.getStoredDoctorName();
     if (storedName) setDoctorName(storedName);
-    // Try to fetch fresh name if authenticated
+    // Try to fetch fresh name and ID if authenticated
     (async () => {
       if (apiService.isAuthenticated()) {
         const me = await apiService.getCurrentDoctor();
@@ -119,6 +124,9 @@ function DummyComponent({
         if (n) {
           setDoctorName(n);
           try { localStorage.setItem('DOCTOR_NAME', n); } catch {}
+        }
+        if (me?.id) {
+          setCurrentDoctorId(me.id);
         }
       }
     })();
@@ -130,19 +138,149 @@ function DummyComponent({
     setMessages(prev => [...prev, message]);
   }, []);
 
+  const showToast = React.useCallback((message: string) => {
+    setToastMessage(message);
+    window.setTimeout(() => setToastMessage(null), 2500);
+  }, []);
+
+  const handleDoctorSubmit = React.useCallback(async () => {
+    if (!currentImageId || !isAuthenticated() || !doctorInput.trim()) {
+      if (!isAuthenticated()) setAuthMode('login');
+      return;
+    }
+
+    try {
+      const saved = await apiService.createComment({
+        content: doctorInput.trim(),
+        image_id: currentImageId,
+        is_ai_generated: false,
+      });
+
+      // Get doctor name for display
+      const displayName = doctorName || 'Doctor';
+
+      // Immediately reflect in View Comments (not in AI chat)
+      setThreadComments(prev => [
+        ...prev,
+        {
+          role: 'user',
+          text: `${displayName}: ${doctorInput.trim()}`,
+          commentId: saved.id,
+          isSaved: true,
+          fullComment: saved,
+        },
+      ]);
+
+      // Switch to View Comments so the new comment is visible instantly
+      setActiveTab('comments');
+
+      // Toast confirmation
+      showToast('Your comment was added and saved.');
+      setDoctorInput('');
+
+      // Update doctor name and ID if not already set
+      if (!doctorName || !currentDoctorId) {
+        const me = await apiService.getCurrentDoctor();
+        const n = (me?.full_name || me?.name) as string | undefined;
+        if (n && !doctorName) {
+          setDoctorName(n);
+          try { localStorage.setItem('DOCTOR_NAME', n); } catch {}
+        }
+        if (me?.id && !currentDoctorId) {
+          setCurrentDoctorId(me.id);
+        }
+      }
+    } catch (err: any) {
+      showToast(`Error adding comment: ${err?.message || 'Unknown error'}`);
+    }
+  }, [currentImageId, doctorInput, doctorName, showToast]);
+
+  const handleEditComment = React.useCallback((commentId: number, currentContent: string) => {
+    setEditingCommentId(commentId);
+    setEditingContent(currentContent);
+  }, []);
+
+  const handleSaveEdit = React.useCallback(async (commentId: number) => {
+    if (!editingContent.trim()) {
+      showToast('Comment content cannot be empty');
+      return;
+    }
+
+    try {
+      const updatedComment = await apiService.updateComment(commentId, {
+        content: editingContent.trim(),
+      });
+
+      // Update the thread comments with the new content and updated timestamp
+      setThreadComments(prev =>
+        prev.map(comment => {
+          if (comment.commentId === commentId) {
+            const authorPrefix = comment.text.split(': ')[0]; // Keep the author prefix
+            return {
+              ...comment,
+              text: `${authorPrefix}: ${updatedComment.content}`,
+              fullComment: updatedComment, // Update with fresh data including new updated_at
+            };
+          }
+          return comment;
+        })
+      );
+
+      setEditingCommentId(null);
+      setEditingContent('');
+      showToast('Comment updated successfully');
+    } catch (error: any) {
+      showToast(`Failed to update comment: ${error.message}`);
+    }
+  }, [editingContent, showToast]);
+
+  const handleCancelEdit = React.useCallback(() => {
+    setEditingCommentId(null);
+    setEditingContent('');
+  }, []);
+
+  const handleDeleteComment = React.useCallback(async (commentId: number) => {
+    if (!confirm('Are you sure you want to delete this comment?')) {
+      return;
+    }
+
+    try {
+      await apiService.deleteComment(commentId);
+
+      // Remove the comment from thread comments
+      setThreadComments(prev =>
+        prev.filter(comment => comment.commentId !== commentId)
+      );
+
+      showToast('Comment deleted successfully');
+    } catch (error: any) {
+      showToast(`Failed to delete comment: ${error.message}`);
+    }
+  }, [showToast]);
+
+  const formatTimestamp = React.useCallback((timestamp: string) => {
+    try {
+      const date = new Date(timestamp);
+      return date.toLocaleString();
+    } catch {
+      return 'Invalid date';
+    }
+  }, []);
+
   // Load existing comments for the current image
   const loadExistingComments = React.useCallback(async (imageId: number) => {
     try {
       const comments = await apiService.getCommentsByImage(imageId);
       const commentMessages: ChatMessage[] = comments.map(comment => {
         const authorPrefix = comment.is_ai_generated
-          ? 'AI'
+          ? 'AI Analysis'
           : (comment as any)?.doctor?.full_name || (comment as any)?.doctor?.name || 'Doctor';
         return {
           role: comment.is_ai_generated ? 'model' : 'user',
           text: `${authorPrefix}: ${comment.content}`,
           commentId: comment.id,
           isSaved: true,
+          fullComment: comment,
         } as ChatMessage;
       });
       setThreadComments(commentMessages);
@@ -262,24 +400,8 @@ function DummyComponent({
     appendMessage({ role: 'user', text: userMessage });
     setInput('');
 
-    // Save user message to database if we have an image ID
-    if (currentImageId && trimmed) {
-      try {
-        const savedComment = await apiService.createComment({
-          content: trimmed,
-          image_id: currentImageId,
-          is_ai_generated: false,
-        });
-
-        // Update thread comments view, do not affect AI chat display tab
-        setThreadComments(prev => [
-          ...prev,
-          { role: 'user', text: `Doctor: ${trimmed}`, commentId: savedComment.id, isSaved: true },
-        ]);
-      } catch (error) {
-        console.error('Failed to save user message to database:', error);
-      }
-    }
+    // Note: User prompts for AI analysis are NOT saved to database
+    // Only the AI responses will be saved as they contain the actual analysis
 
     if (!effectiveApiKey) {
       appendMessage({
@@ -352,7 +474,13 @@ function DummyComponent({
           // Also reflect in thread comments so it appears in View Comments
           setThreadComments(prev => [
             ...prev,
-            { role: 'model', text: `AI: ${aiResponse}`, commentId: savedComment.id, isSaved: true },
+            {
+              role: 'model',
+              text: `AI Analysis: ${aiResponse}`,
+              commentId: savedComment.id,
+              isSaved: true,
+              fullComment: savedComment,
+            },
           ]);
         } catch (error) {
           console.error('Failed to save AI response to database:', error);
@@ -476,19 +604,96 @@ function DummyComponent({
                 </div>
               );
             }
-            return saved.map((msg, idx) => (
-              <div key={idx} className="mb-3" style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'flex-start' }}>
-                <div style={{ maxWidth: '75%', padding: '12px 16px', borderRadius: '12px', border: `2px solid ${msg.role === 'user' ? '#3b82f6' : '#10b981'}`, backgroundColor: msg.role === 'user' ? '#eff6ff' : '#ecfdf5', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', position: 'relative' }}>
-                  <div className="mb-1 text-xs font-semibold" style={{ color: msg.role === 'user' ? '#1e40af' : '#047857', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                    {msg.role === 'user' ? 'Doctor' : 'AI'}
-                    {msg.isSaved && (
-                      <span style={{ marginLeft: '8px', fontSize: '10px', opacity: 0.7 }}>💾 Saved</span>
+            return saved.map((msg, idx) => {
+              const isOwnComment = msg.fullComment && !msg.fullComment.is_ai_generated && msg.fullComment.doctor_id === currentDoctorId;
+              const isEditing = editingCommentId === msg.commentId;
+
+              // Debug info (temporary)
+              console.log('Debug comment:', {
+                commentId: msg.commentId,
+                isAI: msg.fullComment?.is_ai_generated,
+                commentDoctorId: msg.fullComment?.doctor_id,
+                currentDoctorId: currentDoctorId,
+                isOwnComment: isOwnComment
+              });
+
+              return (
+                <div key={idx} className="mb-3" style={{ display: 'flex', justifyContent: 'flex-start', alignItems: 'flex-start' }}>
+                  <div style={{ maxWidth: '85%', padding: '12px 16px', borderRadius: '12px', border: `2px solid ${msg.role === 'user' ? '#3b82f6' : '#10b981'}`, backgroundColor: msg.role === 'user' ? '#eff6ff' : '#ecfdf5', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', position: 'relative' }}>
+                    <div className="mb-2 flex justify-between items-start">
+                      <div className="text-xs font-semibold" style={{ color: msg.role === 'user' ? '#1e40af' : '#047857', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                        {msg.isSaved && (
+                          <span style={{ marginLeft: '8px', fontSize: '10px', opacity: 0.7 }}>
+                            {msg.fullComment?.is_ai_generated ? 'AI (Gemini)' : 'DOCTOR'}
+                          </span>
+                        )}
+                      </div>
+                      {(isOwnComment || (!msg.fullComment?.is_ai_generated && isAuthenticated())) && !isEditing && (
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => handleEditComment(msg.commentId!, msg.fullComment!.content)}
+                            className="text-xs px-2 py-1 rounded"
+                            style={{ backgroundColor: '#f59e0b', color: 'white', border: 'none' }}
+                            title="Edit comment"
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            onClick={() => handleDeleteComment(msg.commentId!)}
+                            className="text-xs px-2 py-1 rounded"
+                            style={{ backgroundColor: '#ef4444', color: 'white', border: 'none' }}
+                            title="Delete comment"
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {isEditing ? (
+                      <div>
+                        <textarea
+                          value={editingContent}
+                          onChange={(e) => setEditingContent(e.target.value)}
+                          className="w-full p-2 border rounded"
+                          rows={3}
+                          style={{ fontSize: '14px', resize: 'vertical' }}
+                        />
+                        <div className="mt-2 flex gap-2">
+                          <button
+                            onClick={() => handleSaveEdit(msg.commentId!)}
+                            className="text-xs px-3 py-1 rounded"
+                            style={{ backgroundColor: '#10b981', color: 'white', border: 'none' }}
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={handleCancelEdit}
+                            className="text-xs px-3 py-1 rounded"
+                            style={{ backgroundColor: '#6b7280', color: 'white', border: 'none' }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="whitespace-pre-wrap" style={{ color: '#374151', lineHeight: '1.5', fontSize: '14px' }}>
+                        {msg.text}
+                      </div>
+                    )}
+
+                    {msg.fullComment && (
+                      <div className="mt-2 text-xs" style={{ color: '#6b7280', borderTop: '1px solid #e5e7eb', paddingTop: '8px' }}>
+                        <div>Created: {formatTimestamp(msg.fullComment.created_at)}</div>
+                        {msg.fullComment.updated_at !== msg.fullComment.created_at && (
+                          <div>Updated: {formatTimestamp(msg.fullComment.updated_at)}</div>
+                        )}
+                      </div>
                     )}
                   </div>
-                  <div className="whitespace-pre-wrap" style={{ color: '#374151', lineHeight: '1.5', fontSize: '14px' }}>{msg.text}</div>
                 </div>
-              </div>
-            ));
+              );
+            });
           })()
         ) : activeTab === 'doctor' ? (
           <div
@@ -591,6 +796,15 @@ function DummyComponent({
                     const res = await apiService.loginDoctor({ email: authEmail.trim(), password: authPassword });
                     if (res?.access_token) {
                       setAuthMode('none');
+                      // Update doctor info after successful login
+                      const me = await apiService.getCurrentDoctor();
+                      if (me?.id) {
+                        setCurrentDoctorId(me.id);
+                      }
+                      const n = (me?.full_name || me?.name) as string | undefined;
+                      if (n) {
+                        setDoctorName(n);
+                      }
                     }
                   } catch (e: any) {
                     setAuthError(e?.message || 'Registration failed');
@@ -608,6 +822,15 @@ function DummyComponent({
                     const res = await apiService.loginDoctor({ email: authEmail.trim(), password: authPassword });
                     if (res?.access_token) {
                       setAuthMode('none');
+                      // Update doctor info after successful login
+                      const me = await apiService.getCurrentDoctor();
+                      if (me?.id) {
+                        setCurrentDoctorId(me.id);
+                      }
+                      const n = (me?.full_name || me?.name) as string | undefined;
+                      if (n) {
+                        setDoctorName(n);
+                      }
                     }
                   } catch (e: any) {
                     setAuthError(e?.message || 'Login failed');
@@ -627,6 +850,7 @@ function DummyComponent({
                 onClick={() => {
                   apiService.logout();
                   setDoctorName(null);
+                  setCurrentDoctorId(null);
                   setAuthMode('login');
                 }}
                 className="rounded-md px-2 py-1"
@@ -642,32 +866,7 @@ function DummyComponent({
               onKeyDown={async e => {
                 if (e.key === 'Enter') {
                   e.preventDefault();
-                  if (!currentImageId || !isAuthenticated()) {
-                    setAuthMode('login');
-                    return;
-                  }
-                  try {
-                    const saved = await apiService.createComment({
-                      content: doctorInput.trim(),
-                      image_id: currentImageId,
-                      is_ai_generated: false,
-                    });
-                    setMessages(prev => [
-                      ...prev,
-                      { role: 'user', text: `You: ${doctorInput.trim()}`, commentId: saved.id, isSaved: true },
-                    ]);
-                    setDoctorInput('');
-                    if (!doctorName) {
-                      const me = await apiService.getCurrentDoctor();
-                      const n = (me?.full_name || me?.name) as string | undefined;
-                      if (n) {
-                        setDoctorName(n);
-                        try { localStorage.setItem('DOCTOR_NAME', n); } catch {}
-                      }
-                    }
-                  } catch (err: any) {
-                    appendMessage({ role: 'model', text: `Error adding doctor comment: ${err?.message || ''}` });
-                  }
+                  await handleDoctorSubmit();
                 }
               }}
               placeholder={isAuthenticated() ? 'Add doctor comment' : 'Sign in to add doctor comment'}
@@ -675,6 +874,17 @@ function DummyComponent({
               style={{ borderColor: '#ddd', flex: '1 1 260px' }}
               disabled={!isAuthenticated()}
             />
+            <button
+              onClick={handleDoctorSubmit}
+              disabled={!isAuthenticated() || !doctorInput.trim() || !currentImageId}
+              className="cursor-pointer rounded-md border-none px-4 py-2 text-white"
+              style={{
+                backgroundColor: (!isAuthenticated() || !doctorInput.trim() || !currentImageId) ? '#9e9e9e' : '#2563eb',
+                flex: '0 0 auto'
+              }}
+            >
+              Submit
+            </button>
           </>
         ) : null}
 
@@ -732,6 +942,16 @@ function DummyComponent({
       {currentImageId && (
         <div className="mt-2 text-xs" style={{ color: '#059669' }}>
           📊 Image registered (ID: {currentImageId}) - Comments will be saved to database
+        </div>
+      )}
+      {toastMessage && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed bottom-4 right-4 z-50 rounded-md px-4 py-2 text-white"
+          style={{ backgroundColor: '#111827', boxShadow: '0 2px 8px rgba(0,0,0,0.2)' }}
+        >
+          {toastMessage}
         </div>
       )}
     </div>
